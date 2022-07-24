@@ -1,0 +1,232 @@
+---
+title: "meteorolgy"
+author: "wanzhen"
+date: '2022-07-08'
+output: 
+  html_document:
+    number_sections: yes
+    theme: readable
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# analze reasons effecting components of pm2.5
+```{r load package,results='hide', message=FALSE, warning=FALSE}
+library(WaveletComp)
+library(imputeTS)
+library(ggplot2)
+library(tidyverse)
+library(patchwork)
+```
+
+
+```{r load data,results='hide', message=FALSE, warning=FALSE}
+beijing.mete <- data.frame(read.csv("beijing.mete.csv",header = TRUE))
+shijiazhuang.mete <- data.frame(read.csv("shijiazhuang.mete.csv",header=TRUE))
+colnames(beijing.mete) <- c("date","Avg.T","Max.T","Min.T","Prec","Press","Wind.dir","Dir","Wind.sp")
+cols <- apply(beijing.mete[,c(2:7,9)],2,as.numeric)
+beijing.data <- data.frame(date=as.Date(beijing.mete$date,format = "%d/%m/%Y"),cols,Dir=beijing.mete$Dir)
+beijing.data <-beijing.data[order(beijing.data$date),]
+shijiazhuang.data <- shijiazhuang.mete[order(as.Date(shijiazhuang.mete$Date,format = "%d/%m/%Y")),]
+colnames(shijiazhuang.data) <- c("date","Avg.T","Max.T","Min.T","Prec","Press","Wind.dir","Dir","Wind.sp")
+```
+
+## temperature
+
+### impute data
+```{r impute}
+ts.beijing.avgT <- ts(beijing.data$Avg.T,frequency = 365,start = c(2014,1))
+ts.shijiazhuang.avgT <- ts(shijiazhuang.data$Avg.T,frequency = 365,start = c(2014,1))
+imp.beijing.avgT <- na_interpolation(ts.beijing.avgT, option="spline")
+com.bj.avgT <- data.frame(date=beijing.data$date,avg.T=imp.beijing.avgT)
+imp.shijiazhuang.avgT <- na_interpolation(ts.shijiazhuang.avgT, option="spline")
+com.sjz.avgT <- data.frame(date=beijing.data$date,avg.T=imp.shijiazhuang.avgT)
+```
+
+```{r ts.tem.image}
+data.tem <- data.frame(date=beijing.data$date,tem.bj=com.bj.avgT$avg.T,tem.sjz = com.sjz.avgT$avg.T)
+data.tem %>% 
+  ggplot() +
+  geom_line(aes(date,tem.bj),col="red") +
+  geom_line(aes(date,tem.sjz),col="black")+
+  scale_y_continuous(breaks = seq(-20,40,10)) +
+  scale_x_date(date_breaks = "1 year") +
+  labs(title = "Temperature",
+       x = "Date",
+       y = "Temperature") +
+  theme(axis.text.x = element_text(angle = 90,vjust = 0.5),
+        plot.title = element_text(hjust = 0.5))+
+  scale_colour_manual(name = 'temperature', 
+                      values =col,
+                      labels=c('Beijing','Shijiazhuang'))
+```
+
+### wavelet analysis
+```{r bj.tem.wt,results='hide', message=FALSE,cache=TRUE}
+my.w.bj <- analyze.wavelet(com.bj.avgT,"avg.T",
+                        dt=1,dj=1/100,
+                        lowerPeriod = 16,
+                        upperPeriod = 512,
+                        make.pval = TRUE,n.sim = 10)
+```
+
+```{r bj.wt.image}
+wt.image(my.w.bj,color.key="interval",n.levels = 250,
+         periodlab = "period(days)",
+         legend.params = list(lab="wavelet power levels"),
+         main = "temperature.Beijing",
+         show.date = TRUE,date.format = "%F",timelab = "",
+         timetcl = -0.5,
+         spec.period.axis = list(at=c(16,32,64,128,365)),
+         periodtck = 1,
+         periodtcl = NULL)
+```
+
+```{r sjz.tem.wt,results='hide', message=FALSE,cache=TRUE}
+my.w.sjz <- analyze.wavelet(com.sjz.avgT,"avg.T",
+                        dt=1,dj=1/100,
+                        lowerPeriod = 16,
+                        upperPeriod = 512,
+                        make.pval = TRUE,n.sim = 10)
+```
+
+```{r sjz.wt.image}
+wt.image(my.w.sjz,color.key="interval",n.levels = 250,
+         periodlab = "period(days)",
+         legend.params = list(lab="wavelet power levels"),
+         main="temperature.Shijiazhuang",
+         show.date = TRUE,date.format = "%F",timelab = "",
+         timetcl = -0.5,
+         spec.period.axis = list(at=c(16,32,64,128,365)),
+         periodtck = 1,
+         periodtcl = NULL)
+```
+
+### coherency of temperature
+```{r wc.tem,results='hide', message=FALSE,cache=TRUE}
+my.wc <- analyze.coherency(data.tem,my.pair = c("tem.bj","tem.sjz"),
+                           dt=1,dj=1/100,
+                           lowerPeriod = 16,make.pval = TRUE,n.sim = 10)
+```
+
+```{r tem.wc.iamge}
+wc.image(my.wc,which.image = "wc",color.key = "interval",
+         n.levels = 250,
+         exponent = 2,
+         timetcl = -0.5,
+         siglvl.contour = 0.1,siglvl.arrow = 0.05,
+         legend.params = list(lab="wavelet coherence levels"),
+         timelab = "",
+         main="Beijing temperature over shijiazhuang",
+         show.date = TRUE,date.format = "%F",
+         spec.period.axis = list(at=c(16,32,64,128,365)),
+         periodtck = 1,
+         periodtcl = NULL)
+```
+
+### phase difference
+```{r tem.wc.phase}
+at.ph <- seq(-pi,pi,by=pi/3)
+labels.ph <- round(seq(-365/2,365/2,by=365/6),1)
+at.t <- seq(from=as.Date("2014-01-01"),to=as.Date("2022-06-30"),by="years")
+labels.t <- format(at.t,format="%Y")
+wc.sel.phases(my.wc,sel.period=365,siglvl=1,
+              spec.phase.axis = list(at=at.ph,labels=labels.ph),
+              timelab = "",
+              phaselab = "phase (day)",
+              show.date = TRUE, date.format="%Y",
+              spec.time.axis = list(at=at.t,labels=labels.t),
+              only.coi = TRUE,
+              main="Beijing temperature over Shijiazhuang")
+abline(h=0)
+```
+
+## wind
+
+### data preprocessing
+```{r wd.wt,results='hide', message=FALSE,cache=TRUE}
+#data preprocessing
+ts.beijing.winsp <- ts(beijing.data$Wind.sp,frequency = 365,start = c(2014,1))
+imp.beijing.winsp <- na_interpolation(ts.beijing.winsp, option="spline")
+com.bj.winsp <- data.frame(date=beijing.data$date,Wind.sp=imp.beijing.winsp)
+data.wind <- data.frame(date=beijing.data$date,win.bj=com.bj.winsp$Wind.sp,win.sjz = shijiazhuang.data$Wind.sp)
+```
+
+```{r ts.wind.image}
+data.wind %>% 
+  ggplot() +
+  geom_line(aes(date,win.bj),col="red") +
+  geom_line(aes(date,win.sjz),col="black")+
+  scale_y_continuous(breaks = seq(0,30,10)) +
+  scale_x_date(date_breaks = "1 year") +
+  labs(title = "Wind speed",
+       x = "Date",
+       y = "Wind speed") +
+  theme(axis.text.x = element_text(angle = 90,vjust = 0.5),
+        plot.title = element_text(hjust = 0.5))+
+  scale_colour_manual(name = 'Wind speed', 
+                      values =col,
+                      labels=c('Beijing','Shijiazhuang'))
+```
+
+### coherency of wind
+```{r wc.win,results='hide', message=FALSE,cache=TRUE}
+my.wc.win <- analyze.coherency(data.wind,my.pair = c("win.bj","win.sjz"),
+                           dt=1,dj=1/100,
+                           lowerPeriod = 16,make.pval = TRUE,n.sim = 10)
+```
+
+```{r wc.win.image}
+wc.image(my.wc.win,which.image = "wc",color.key = "interval",
+         n.levels = 250,
+         timetcl = -0.5,
+         siglvl.contour = 0.1,siglvl.arrow = 0.05,
+         legend.params = list(lab="wavelet coherence levels"),
+         timelab = "",
+         main="Beijing wind speed over shijiazhuang",
+         show.date = TRUE,date.format = "%F",
+         spec.period.axis = list(at=c(16,32,64,128,365)),
+         periodtck = 1,
+         periodtcl = NULL)
+```
+
+### phase difference
+```{r wd.wc.pahse}
+at.ph <- seq(-pi,pi,by=pi/3)
+labels.ph <- round(seq(-365/2,365/2,by=365/6),1)
+at.t <- seq(from=as.Date("2014-01-01"),to=as.Date("2022-06-30"),by="years")
+labels.t <- format(at.t,format="%Y")
+wc.sel.phases(my.wc.win,sel.period=365,siglvl=1,
+              spec.phase.axis = list(at=at.ph,labels=labels.ph),
+              timelab = "",
+              main="Beijing wind speed over shijiazhuang",
+              phaselab = "phase (day)",
+              show.date = TRUE, date.format="%Y",
+              spec.time.axis = list(at=at.t,labels=labels.t),
+              only.coi = TRUE)
+abline(h=0)
+```
+
+```{r phase.diff}
+phase.diff.extra <- function(wc,sel.period){
+  row.closest.to.period <- which.min(abs(wc$Period-sel.period))
+  angle.series <- wc$Angle[row.closest.to.period,]
+  lead.time <- sel.period*(angle.series/(2*pi))
+}
+lead.time.tem <- phase.diff.extra(my.wc,365)
+lead.time.wind <- phase.diff.extra(my.wc.win,365)
+data.phasediff <- data.frame(date=beijing.data$date,tem.phasedif=lead.time.tem,win.phasedif=lead.time.wind)
+ggplot(data=data.phasediff)+
+  geom_line(aes(date,tem.phasedif),col="light green")+
+  geom_line(aes(date,win.phasedif),col="yellow")+
+  scale_y_continuous(breaks = seq(0,60,10)) +
+  scale_x_date(date_breaks = "1 year") +
+  labs(title = "phase difference",
+       x = "Date",
+       y = "phase difference") +
+  theme(axis.text.x = element_text(angle = 90,vjust = 0.5),
+        plot.title = element_text(hjust = 0.5))
+```
