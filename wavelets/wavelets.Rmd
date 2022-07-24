@@ -1,0 +1,489 @@
+---
+title: "univariate time series"
+author: "wanzhen"
+date: '2022-06-10'
+output: 
+  html_document:
+    number_sections: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# univariate time series
+## a series with constant period
+```{r}
+library(WaveletComp)
+library(ggplot2)
+library(imputeTS)
+x = periodic.series(start.period = 50,length = 1000)#时序固定周期为50
+x = x + 0.2*rnorm(1000)#添加噪声
+plot(ts(x))#原始时间序列图
+my.data <- data.frame(x=x)
+my.w <- analyze.wavelet(my.data, "x",loess.span = 0,dt=1,dj=1/250,
+                        lowerPeriod = 16,
+                        upperPeriod = 128,
+                        make.pval = TRUE,
+                        n.sim=10)
+wt.image(my.w,color.key = "quantile",n.levels = 250,legend.params = list(lab="wavelet power levels",mar = 4.7))
+reconstruct(my.w,plot.waves = TRUE,lwd = c(1,2),legend.coords = "bottomleft",ylim=c(-1.8,1.8))
+
+```
+
+**参数含义**
+
+- loess.span=0:是否需要去趋势，之后在小波变换之前会进一步标准化，默认值为0.75，控制时间序列的平滑性
+- dt:时间分辨率，一个观测出现的时间单位，$1/dt=n(x)$，如果是按每小时采样的，使用$dt=1/24$，那么时间单位为1天，默认值为1
+- dj:频域分辨率，频域上的采样分辨率，$1/dj=n(suboctaves)$,[2^4,2^5],[2^5,2^6],[2^6,2^7],覆盖我们感兴趣的频率(由周期决定),每个周期区间取对数后长度相同，默认值1/20
+- lowerperiod:小波分解的傅里叶周期下限，默认值2*dt
+- upperperiod:小波分解的傅里叶周期上限,默认值时间序列长度的1/3*dt
+- make.pval:是否计算p值,n.sim，模拟次数
+
+
+## a series with variable period
+```{r}
+x=periodic.series(start.period = 20,end.period = 100,length = 1000)
+x=x+0.2*rnorm(1000)
+
+my.data <- data.frame(x)
+my.w <- analyze.wavelet(my.data,"x",
+                        loess.span = 0,
+                        dt=1,dj=1/250,
+                        lowerPeriod = 16,
+                        upperPeriod = 128,
+                        make.pval = TRUE,n.sim=10)
+wt.image(my.w,n.levels = 250,legend.params = list(lab="wavelet power levels"))
+my.rec <- reconstruct(my.w)
+
+```
+
+## a series with two periods
+```{r}
+x1 <- periodic.series(start.period = 80,length = 1000)
+x2 <- periodic.series(start.period = 39,length = 1000)
+x <- x1+x2+0.2*rnorm(1000)
+
+my.data <- data.frame(x=x)
+my.w <- analyze.wavelet(my.data,"x",
+                        loess.span = 0,
+                        dt=1,dj=1/250,
+                        lowerPeriod = 16,
+                        upperPeriod = 128,
+                        make.pval=TRUE,n.sim = 10)
+wt.image(my.w,n.levels = 250,legend.params = list(lab="waveler power levels"))
+reconstruct(my.w,plot.waves = TRUE,lwd = c(1,2),legend.coords = "bottomleft")
+```
+
+### average power
+```{r}
+x1 <- periodic.series(start.period = 100,length = 500)
+x2 <- periodic.series(start.period = 60,length=500)
+x <- c(x1,x2)+0.3*rnorm(1000)
+y1 <- periodic.series(start.period = 100,length = 1000)
+y2 <- 1.2*periodic.series(start.period=60,length = 1000)
+y <- (y1+y2)/2+0.3*rnorm(1000)
+par(mfrow=c(2,1))#对比两个序列，序列y携带更为密集的信息，因为两个频率成份贯穿时间轴
+plot(ts(x))
+plot(ts(y))
+my.data <- data.frame(x=x,y=y)
+my.wx <- analyze.wavelet(my.data,"x",loess.span = 0,
+                         dt=1,dj=1/20,
+                         lowerPeriod = 16,upperPeriod = 256,
+                         make.pval = TRUE,n.sim = 10)
+my.wy <- analyze.wavelet(my.data,"y",loess.span = 0,
+                         dt=1,dj=1/20,
+                         lowerPeriod = 16,upperPeriod = 256,
+                         make.pval = TRUE,n.sim=10)
+maximum.level=1.001*max(my.wx$Power.avg,my.wy$Power.avg)
+wt.avg(my.wx,maximum.level = maximum.level)#序列x的平均功率
+wt.avg(my.wy,maximum.level = maximum.level)#序列y的平均功率
+#两个序列的平均功率图非常相似，不能辨别出连续周期和叠加周期
+```
+
+## selecting the method of analysis
+
+小波分析函数中提供了参数method的多种选择，用于指定原假设（序列不存在周期性）的检验方法，不同方法的选择决定了检验统计的灵敏性。
+```{r}
+x1 <- periodic.series(start.period = 100,length=400)
+x2 <- 1.2*periodic.series(start.period = 50,length = 200)
+x <- c(x1,x2,x1)+0.2*rnorm(1000)
+my.data <- data.frame(x=x)
+#选择白噪声
+my.w <- analyze.wavelet(my.data,"x",
+                        method = "white.noise",
+                        loess.span = 0,
+                        dt=1,dj=1/250,
+                        lowerPeriod = 32,upperPeriod=256,
+                        make.pval = TRUE,n.sim=10)
+wt.image(my.w,color.key = "interval",n.levels = 250,
+         legend.params = list(lab="wavelet power levels"))
+#选择傅里叶随机数
+my.w <- analyze.wavelet(my.data,"x",
+                        method = "Fourier.rand",
+                        loess.span = 0,
+                        dt=1,dj=1/250,
+                        lowerPeriod = 32,upperPeriod=256,
+                        make.pval = TRUE,n.sim=10)
+wt.image(my.w,color.key = "interval",n.levels = 250,
+         legend.params = list(lab="wavelet power levels"))
+#两种方法不同在于，傅里叶随机数的显著性区域更窄，几乎局限周期50的时间区间内，因为傅里叶随机化假定频率是常数，它只监测平均周期的波动情况
+```
+## plotting the power spectrum
+
+功率谱的画法
+- 改变画板颜色使用quantile颜色更加均匀
+```{r}
+wt.image(my.w,color.key = "quantile",n.levels = 250,
+         legend.params = list(lab="wavelet power levels",label.digit = 2))
+#灰度图
+wt.image(my.w,n.levels = 250,
+         legend.params = list(lab="wavelet power levels",label.digits=2),
+         color.palette = "gray((n.levels):1/n.levels)",
+         col.ridge = "blue")
+```
+- 时间轴定制
+```{r}
+epoch.seq <- seq(from = as.POSIXct("2018-01-01 00:00:00"),
+                 to = as.POSIXct("2018-01-30 23:00:00"),by=3600)
+x <- periodic.series(start.period = 24,length = 720)
+x <- x+rnorm(720)
+my.data <- data.frame(date=epoch.seq,x=x)
+
+my.w <- analyze.wavelet(my.data,"x",loess.span = 0,dt=1/24,dj=1/500,
+                        lowerPeriod = 1/4,upperPeriod = 2,make.pval = TRUE)
+  
+wt.image(my.w,periodlab="periods(days)",legend.params = list(lab="wavelet power levels"),
+         label.time.axis = T)#默认情况使用观测数作为横轴
+wt.image(my.w,periodlab = "periods(days)",
+         legend.params = list(lab="wavelet power levels"),
+         label.time.axis = TRUE,
+         spec.time.axis=list(at=seq(1,720,by=48),labels=seq(0,28,by=2)))#以偶数天作为横轴
+wt.image(my.w,periodlab="periods(days)",legend.params = list(lab="wavelet power levels"),
+         label.time.axis = T,
+         spec.period.axis = list(at=seq(1,720,by=50),labels=seq(0,719,by=50)))#以小时为横轴
+
+wt.image(my.w,periodlab="periods(days)",legend.params = list(lab="wavelet power levels"),
+         label.time.axis = T,
+         show.date = TRUE,date.format ="%F %T")
+
+ticks <- seq(as.POSIXct("2018-01-01 00:00:00",format="%F %T"),as.POSIXct("2018-01-30 23:00:00",format="%F %T"),by="week")
+
+labes <- seq(as.Date("2018-01-01"),as.Date("2018-01-29"),by="week")
+labels <- paste("Mon,",labes)
+wt.image(my.w,periodlab="periods(days)",legend.params = list(lab="wavelet power levels"),
+         label.time.axis = T,
+         show.date = TRUE,date.format="%F %T",
+         spec.time.axis = list(at=ticks,labels=labels,las=2))
+```
+
+# analysis of a biavariate time series
+## constant period
+```{r}
+x1 <- periodic.series(start.period = 1*24,length = 24*96)
+x2 <- periodic.series(start.period = 2*24,length = 24*96)
+x3 <- periodic.series(start.period = 4*24,length = 24*96)
+x4 <- periodic.series(start.period = 8*24,length = 24*96)
+x5 <- periodic.series(start.period = 16*24,length = 24*96)
+x <- x1+x2+3*x3+x4+x5+0.5*rnorm(24*96)
+y <- x1+x2-3*x3+x4+3*x5+0.5*rnorm(24*96)#96天的小时数据
+par(mfrow=c(2,1))
+plot(ts(x))
+plot(ts(y))
+
+```
+### cross-wavelet transform
+```{r}
+my.data <- data.frame(x=x,y = y)
+my.wc <- analyze.coherency(my.data,my.pair = c("x","y"),
+                           loess.span = 0,
+                           dt=1/24,dj=1/100,#每个时间单位有24个观测（天）
+                           lowerPeriod = 1/2,#最小周期定位1/2，12小时
+                           make.pval = TRUE,n.sim = 10)
+```
+
+### cross-wavelet power spectrum
+```{r}
+wc.image(my.wc,n.levels = 250,
+         legend.params = list(lab="cross-waveler power levels"),
+         timelab = "",periodlab = "period(days)")
+```
+
+### time-averaged cross-wavelet power
+```{r}
+wc.avg(my.wc,siglvl = 0.01,sigcol = "red",sigpch = 20,#默认实心圆
+       periodlab = "period(days)")
+```
+
+### individual wavelet
+```{r}
+wt.image(my.wc,my.series="x")
+```
+
+## variable periods,power specturm
+```{r}
+xx <- periodic.series(start.period = 64,length=128*3)
+xy <- periodic.series(start.period = 128,length=2*128*3)
+x <- c(xx,xy,xx)+0.2*rnorm(4*128*3)#周期为128
+y <- periodic.series(start.period = 128,phase = -16,length = 4*128*3)+0.2*rnorm(4*128*3)#相位变化
+ts.plot(ts(x),ts(y),gpars = list(col=c("black","red")))#时序图
+```
+
+### cross-wavelet transform of x and y
+```{r}
+my.data <- data.frame(x=x,y = y)
+my.wc <- analyze.coherency(my.data,my.pair = c("x","y"),
+                           loess.span = 0,
+                           dt=1,dj=1/100,
+                           make.pval = TRUE,n.sim=10)
+```
+
+### corss-wavelet spectrum
+```{r}
+wc.image(my.wc,n.levels = 259,siglvl.contour = 0.1,siglvl.arrow = 0.05,
+         legend.params = list(lab="cross-wavelet power level"),
+         timelab = ""
+         )
+```
+交叉小波功率对应于协方差，即使只有一个分量波动很大，协方差也可能很大，可用下列两种方法产生更可信的图像，强调x和y的联合周期性
+
+1. 将画箭头的区域限制在x,y小波变换都显著的区域，通过选择颜色，避免了上图由于功率梯度过大而产生的伪影
+```{r}
+wc.image(my.wc,n.levels = 250,color.key = "interval",
+         siglvl.contour = 0.01,siglvl.arrow = 0.05, which.arrow.sig = "wt",
+         legend.params = list(lab="cross-wavelet power levels"),
+         timelab = "")
+```
+
+2.画出小波相干，而不是交叉小波的功率图，小波相干相当于相关系数，已经对单个功率的不同进行过调整，见下例
+
+## variable periods, coherence
+
+```{r}
+#指定wc.image的参数which.iamge="wp",p代表power,换成wc，将会画小波相干图
+wc.image(my.wc,which.image = "wc",color.key = "interval",
+         n.levels = 250,
+         siglvl.contour = 0.1,siglvl.arrow = 0.05,
+         legend.params = list(lab="wavelet coherence levels"),
+         timelab = "")
+```
+- 在计算my.wc中控制光滑性的参数使window.type.t和window.size.t指定平滑窗的类型和在时间于上的大小，默认的使Bartlett windows（window.type.t=1,window.type.s=1）,window.size.t=5每个时间单位取得t=5,window.size.s=1/4,在单位频率1/dj=100，s方向上的大小为25
+
+### control smoothing
+```{r}
+my.wc2 <- analyze.coherency(my.data,my.pair = c("x","y"),
+                           loess.span = 0,
+                           dt=1,dj=1/100,
+                           window.type.t = 1,window.type.s = 1,
+                           window.size.t = 5,window.size.s = 1,
+                           make.pval = TRUE,n.sim=10)#window.size.s变为1，扩大了4倍
+wc.image(my.wc2,which.image = "wc",color.key = "interval",
+         n.levels = 250,
+         siglvl.contour = 0.1,siglvl.arrow = 0.05,
+         legend.params = list(lab="wavelet coherence levels"),
+         timelab = "")#短周期的界限更模糊，对Barttet窗进行模糊处理
+```
+```{r}
+my.wc3 <- analyze.coherency(my.data,my.pair = c("x","y"),
+                           loess.span = 0,
+                           dt=1,dj=1/100,
+                           window.type.t = 3,window.type.s = 3,
+                           window.size.t = 5,window.size.s = 1,
+                           make.pval = TRUE,n.sim=10)#window.size.s变为1，扩大了4倍
+wc.image(my.wc3,which.image = "wc",color.key = "interval",
+         n.levels = 250,
+         siglvl.contour = 0.1,siglvl.arrow = 0.05,
+         legend.params = list(lab="wavelet coherence levels"),
+         timelab = "")#使用Boxcar平滑，使高频部分粒度更小
+```
+
+### variable periods, phase differences
+
+在周期128的相位的相关路径图可以使用phase，和phase difference画出
+```{r}
+wc.sel.phases(my.wc,sel.period = 128,
+              only.sig = TRUE,#default
+              which.sig = "wc",#default为wt，
+              siglvl = 0.05,#default
+              phaselim = c(-pi,+pi),
+              legend.coords = "topright",legend.horiz = FALSE,
+              main = "",sub="",timelab = "")
+```
+转化为更为直观的时间单位上的相差
+```{r}
+at.ticks <- seq(from = -pi, to = pi, by = pi/4)
+label.ticks <- (at.ticks/pi)*(128/2)
+wc.sel.phases(my.wc,sel.period = 128,
+              which.sig = "wc",
+              phaselim = c(-pi,pi),
+              phaselab = "phase(time unit)",
+              spec.phase.axis = list(at=at.ticks,labels=label.ticks),
+              legend.coords = "topright",legend.horiz = FALSE,
+              main="",sub="",timelab = "")
+```
+全局的相位差
+```{r}
+wc.phasediff.image(my.wc,which.contour = "wc",use.sAngle = TRUE,
+                   n.levels = 250,siglvl = 0.1,
+                   legend.params = list(lab="phase difference levels",lab.line=3),
+                   timelab = "")
+```
+
+### more about phase differences
+```{r}
+x <- 2*periodic.series(start.period = 3*24,end.period = 5*24,length = 24*96)+0.5*rnorm(24*96)
+y <- periodic.series(start.period = 4*24,length = 24*96)+0.5*rnorm(24*96)
+
+ts.plot(ts(x),ts(y),col=c("black","red"))
+
+my.data <- data.frame(x=x,y=y)
+my.wc <- analyze.coherency(my.data,my.pair = c("x","y"),
+                           loess.span = 0,
+                           lowerPeriod = 0.5,upperPeriod = 32,
+                           dt=1/24,dj=1/100,
+                           make.pval = TRUE,n.sim=10)
+wc.image(my.wc,n.levels = 250,
+         siglvl.contour = 0.1,siglvl.arrow=0.05,
+         legend.params = list(lab="cross-wavelet power levels"),
+         timelab = "",
+         periodlab = "period(days)")
+
+wc.sel.phases(my.wc,sel.period = 4,only.sig = TRUE,siglvl = 0.05,
+              which.sig = "wt",
+              legend.coords = "topleft",
+              phaselim = c(-pi,+pi+1),
+              main = "",sub="",timelab = "")
+```
+
+#Example in reality
+## Transaction in the foreign exchange market
+```{r}
+data("FXtrade.transactions")
+head(FXtrade.transactions)#记录每5分钟交易的外汇数量，包含四周整
+plot(ts(FXtrade.transactions$transactions))
+my.data <- FXtrade.transactions
+
+at <- seq(1,nrow(my.data),by=12*24)
+labels <- strftime(as.POSIXct(my.data$date[at],format="%F %T",tz="GMT"),format = "%b %d")
+plot(ts(my.data$transactions),xaxt="n")
+axis(1,at=at,labels = labels)
+
+```
+### seasonality in the series of transactions
+```{r}
+my.data.a <- FXtrade.transactions[FXtrade.transactions$active==TRUE,]
+my.w.z <- analyze.wavelet(my.data.a,"transactions",
+                          loess.span = 0.0,
+                          dt=1/(12*24),
+                          dj=1/50,
+                          lowerPeriod = 1/8,#感兴趣的最小周期是3小时
+                          make.pval = TRUE,
+                          n.sim = 10)
+at <- seq(1,nrow(my.data.a),by=12*24)
+labels <- strftime(as.POSIXct(my.data.a$date[at],format="%F %T",tz="GMT"),format = "%b %d")#定制时间轴
+wt.image(my.w.z,n.levels = 250,periodlab = "period(active days)",
+         legend.params = list(lab="wavelet power levels"),
+         spec.time.axis = list(at=at,labels=labels))
+```
+
+### reconstruction
+```{r}
+my.rec.a <- reconstruct(my.w.z,plot.waves = FALSE,
+                        spec.time.axis = list(at=at,labels=labels))
+transaction.rec.a <- my.rec.a$series$transactions.r
+transaction.rec.a[transaction.rec.a<0] <- 0
+transaction.rec <- rep(0,nrow(FXtrade.transactions))
+transaction.rec[FXtrade.transactions$active==TRUE] <- transaction.rec.a
+
+```
+
+#PM2.5
+
+## 数据预处理，缺失值填补 impute
+```{r}
+pm2.5.sum <- read.csv("sum_cityPm2.5.csv",header = TRUE)
+my.data <- data.frame(date=as.Date(pm2.5.sum$date),Beijing=pm2.5.sum$北京,zhijiazhuang=pm2.5.sum$石家庄)
+ts.beijing <- ts(my.data$Beijing,frequency = 365,start = c(2014,1))
+ts.shijiazhuang <- ts(my.data$zhijiazhuang,frequency = 365,start = c(2014,1))
+
+#数据预处理，缺失值
+obs.missing <- my.data[(is.na(my.data$Beijing) | is.na(my.data$zhijiazhuang)), ]
+View(obs.missing)
+
+library(imputeTS)#时间序列单变量插补
+ggplot_na_distribution(ts.beijing)#NA的分布
+ggplot_na_distribution(ts.shijiazhuang)
+imp.beijing <- na_interpolation(ts.beijing, option="spline")
+imp.shijiazhuang <- na_interpolation(ts.shijiazhuang,option = "spline")
+ggplot_na_imputations(ts.beijing, imp.beijing)
+com.bj <- data.frame(pm2.5=imp.beijing)
+com.sjz <- data.frame(pm2.5=imp.shijiazhuang)
+
+```
+
+## 小波分析
+### 北京pm2.5小波分析
+```{r}
+my.w <- analyze.wavelet(com.bj,"pm2.5",
+                        dt=1,dj=1/100,
+                        lowerPeriod = 32,
+                        upperPeriod = 512,
+                        make.pval = TRUE,n.sim = 10)
+
+at <- seq(1,nrow(com.bj),by=60)
+labels <- strftime(as.POSIXct(my.data$date[at],tz="GMT"),format = "%F")#定制时间轴
+```
+
+```{r}
+#小波功率谱
+wt.image(my.w,n.levels = 250,periodlab = "period(days)",
+         legend.params = list(lab="wavelet power levels"),
+         spec.time.axis = list(at=at,labels=labels,las=2))
+```
+
+选取周期为32-521频段进行分析，北京pm2.5小波分解后的周期性呈现不连续状态
+
+```{r}
+#北京pm2.5时间序列的平均功率
+maximum.level=1.001*max(my.w$Power.avg)
+wt.avg(my.w,maximum.level = maximum.level)#北京pm2.5时间序列的平均功率
+```
+
+### 石家庄pm2.5小波分析
+```{r}
+my.w.sjz <- analyze.wavelet(com.sjz,"pm2.5",
+                        dt=1,dj=1/100,
+                        lowerPeriod = 32,
+                        upperPeriod = 512,
+                        make.pval = TRUE,n.sim = 10)
+
+at <- seq(1,nrow(com.bj),by=60)
+labels <- strftime(as.POSIXct(my.data$date[at],tz="GMT"),format = "%F")#定制时间轴
+
+
+wt.image(my.w.sjz,n.levels = 250,periodlab = "period(days)",
+         legend.params = list(lab="wavelet power levels"),
+         spec.time.axis = list(at=at,labels=labels,las=2))
+```
+
+## 北京和石家庄pm2.5小波相干分析
+```{r}
+my.data <- data.frame(pm2.5.bj=com.bj$pm2.5,pm2.5.sjz = com.sjz$pm2.5)
+my.wc <- analyze.coherency(my.data,my.pair = c("pm2.5.bj","pm2.5.sjz"),
+                           dt=1,dj=1/100,
+                           window.type.t = 3,window.type.s = 3,
+                           window.size.t = 5,window.size.s = 1,
+                           lowerPeriod = 32,
+                           make.pval = TRUE,n.sim = 10)
+#平均功率图
+wc.avg(my.wc,siglvl = 0.01,sigcol = "red",sigpch = 20,#默认实心圆
+       periodlab = "period(days)")
+
+#小波相干图
+wc.image(my.wc,which.image = "wc",color.key = "interval",
+         n.levels = 250,
+         siglvl.contour = 0.1,siglvl.arrow = 0.05,
+         legend.params = list(lab="wavelet coherence levels"),
+         timelab = "")
+```
+

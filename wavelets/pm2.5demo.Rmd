@@ -1,0 +1,175 @@
+---
+title: "wavelet analysis of pm2.5"
+author: "wanzhen"
+date: '2022-06-29'
+output:
+  html_document:
+    number_sections: yes
+    fig_caption: yes
+    theme: readable
+    toc: yes
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# PM2.5
+
+```{r load packages,results='hide', message=FALSE, warning=FALSE}
+library(WaveletComp)
+library(imputeTS)
+library(ggplot2)
+library(tidyverse)
+```
+
+## 数据预处理，缺失值填补 impute
+
+```{r load data}
+pm2.5.sum <- data.frame(read.csv("sum_cityPm2.5.csv",header = TRUE))
+ts.beijing <- ts(pm2.5.sum[,3],frequency = 365,start = c(2014,1))
+avg.bj <- mean(ts.beijing,na.rm = TRUE)
+ts.shijiazhuang <- ts(pm2.5.sum[,5],frequency = 365,start = c(2014,1))
+avg.sjz <- mean(ts.shijiazhuang,na.rm = TRUE)
+par(mfrow=c(2,1))
+plot(ts.beijing,xlab="",ylab="pm2.5",main="Beijing")
+abline(h=avg.bj,col="red")
+mtext(text = round(avg.bj,1),side=4,at=avg.bj,las=1,line=0.5,col="red")
+plot(ts.shijiazhuang,xlab="",ylab="pm2.5",main="Shijiazhuang")
+abline(h=avg.sjz,col="red")
+mtext(text = round(avg.sjz,1),side=4,at=avg.bj,las=2,line=0.5,col="red")
+```
+
+**从两地的时序图可知石家庄地区的pm2.5浓度水平明显高于北京地区的浓度水平,且两时间序列呈现一定的周期性，石家庄pm2.5浓度序列周期性更为明显，两地的pm2.5浓度在近六年有下降的趋势**
+
+```{r des missing data}
+#数据预处理，缺失值
+obs.missing <- pm2.5.sum[(is.na(pm2.5.sum[,3]) | is.na(pm2.5.sum[,5])),c(2,3,5) ]
+obs.missing
+#NA的分布
+ggplot_na_distribution(ts.beijing,title = "NA's distribution of Beijing.pm2.5")
+ggplot_na_distribution(ts.shijiazhuang,title = "NA's distribution of Shijiazhunag.pm2.5")
+```
+
+**数据为随机缺失，一般连续2-3天，北京pm2.5数据缺失值数量12天，缺失值占比0.547%，石家庄pm2.5数据缺失值15天，缺失占比0.684%**
+
+```{r impute}
+#缺失值线性插补
+imp.beijing <- na_interpolation(ts.beijing, option="spline")
+imp.shijiazhuang <- na_interpolation(ts.shijiazhuang,option = "spline")
+com.bj <- data.frame(date=as.Date(pm2.5.sum$date),pm2.5=imp.beijing)
+com.sjz <- data.frame(date=as.Date(pm2.5.sum$date),pm2.5=imp.shijiazhuang)
+```
+
+## 小波分析
+
+### 北京pm2.5小波分析
+
+```{r bj-wt,cache=TRUE}
+my.w <- analyze.wavelet(com.bj,"pm2.5",
+                        dt=1,dj=1/100,
+                        lowerPeriod = 16,
+                        upperPeriod = 512,
+                        make.pval = TRUE,n.sim = 10)
+
+```
+
+```{r bj-power-img}
+#小波功率谱
+wt.image(my.w,color.key="interval",n.levels = 250,
+         periodlab = "period(days)",
+         exponent = 0.4,
+         legend.params = list(lab="wavelet power levels"),
+         show.date = TRUE,date.format = "%F",timelab = "",
+         timetcl = -0.5)
+```
+
+**选取周期为16-521的频段进行分析，在高频段时周期最为显著，但周期性在整个时间轴2014-2019上不连续,原因有待分析**
+
+```{r bj-avg-power-img}
+#北京pm2.5时间序列的平均功率
+maximum.level=1.001*max(my.w$Power.avg)
+wt.avg(my.w,maximum.level = maximum.level)#北京pm2.5时间序列的平均功率
+```
+
+**小波分解的平均功率图中也证实高频段的幅度最大，其他频段的幅度相对较小**
+
+
+### 石家庄pm2.5小波分析
+
+```{r sjz-wt,cache=TRUE,results='hide', message=FALSE}
+my.w.sjz <- analyze.wavelet(com.sjz,"pm2.5",
+                        dt=1,dj=1/100,
+                        lowerPeriod = 16,
+                        upperPeriod = 512,
+                        make.pval = TRUE,n.sim = 10)
+```
+
+```{r sjz-power-img}
+wt.image(my.w.sjz,color.key = "interval",n.levels = 250,
+         periodlab = "period(days)",
+         exponent = 0.4,
+         legend.params = list(lab="wavelet power levels"),
+         show.date = TRUE,date.format="%F",timelab = "",
+         timetcl = -0.5,
+         spec.period.axis = list(at = c(16,32,64,128,356,512)),
+         periodtck=1,periodtcl=NULL
+         )
+```
+
+**石家庄的pm2.5时间序列小波频谱图可知，周期大约为356是显著的，并且在整个周期上显著性是连续**
+
+## 北京和石家庄pm2.5小波相干分析
+
+```{r wc,cache=TRUE,results='hide', message=FALSE}
+my.data <- data.frame(date=as.Date(pm2.5.sum$date),pm2.5.bj=com.bj$pm2.5,pm2.5.sjz = com.sjz$pm2.5)
+my.wc <- analyze.coherency(my.data,my.pair = c("pm2.5.bj","pm2.5.sjz"),
+                           dt=1,dj=1/100,
+                           window.type.t = 3,window.type.s = 3,
+                           window.size.t = 5,window.size.s = 1,
+                           lowerPeriod = 16,make.pval = TRUE,n.sim = 10)
+```
+
+
+```{r wc-image}
+#小波相干图
+wc.image(my.wc,which.image = "wc",color.key = "interval",
+         n.levels = 250,
+         exponent = 1.5,
+         timetcl = -0.5,
+         siglvl.contour = 0.1,siglvl.arrow = 0.05,
+         legend.params = list(lab="wavelet coherence levels"),
+         timelab = "",
+         show.date = TRUE,date.format = "%F",
+         spec.period.axis = list(at=c(16,32,64,128,365)),
+         periodtck = 1,
+         periodtcl = NULL)
+```
+
+
+## 相位差分析
+```{r phase difference}
+at.ph <- seq(-pi,pi,by=pi/3)
+labels.ph <- round(seq(-365/2,365/2,by=365/6),1)
+at.t <- seq(from=as.Date("2014-01-01"),to=as.Date("2022-06-30"),by="years")
+labels.t <- format(at.t,format="%Y")
+wc.sel.phases(my.wc,sel.period=365,siglvl=1,
+              spec.phase.axis = list(at=at.ph,labels=labels.ph),
+              timelab = "",
+              phaselab = "phase (day)",
+              show.date = TRUE, date.format="%Y",
+              spec.time.axis = list(at=at.t,labels=labels.t),
+              only.coi = TRUE,
+              main="Beijing pm2.5 over Shijiazhuang pm2.5")
+abline(h=0)
+```
+
+**2014-2017北京和石家庄同时变化，2017-2022，北京和石家庄相位差为负，石家庄的pm2.5领先于北京，相位差先增后减，**
+```{r phase.diff.extra}
+row.closest.to.365 <- which.min(abs(my.wc$Period-365))
+angle.series <- my.wc$Angle[row.closest.to.365,]
+lead.time <- 365*(angle.series/(2*pi))
+ts.lead.time<- ts(lead.time,frequency = 365,start = c(2014,1))
+plot(ts.lead.time)
+```
+
